@@ -4,6 +4,11 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 #
+import sys
+import os
+
+# Add the 'src' directory to Python path
+sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 
 import argparse
 
