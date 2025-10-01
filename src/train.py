@@ -94,7 +94,9 @@ def save_variance_statistics(encoder, images, context_masks, epoch, itr, output_
     Save patch-wise variance statistics from MC forward passes.
     
     Args:
-        encoder: The encoder model
+        
+
+encoder: The encoder model
         images: Batch of images [B, C, H, W]
         context_masks: Boolean masks for context regions [B, N]
         epoch: Current epoch number
@@ -414,6 +416,18 @@ def main(args, resume_preempt=False):
         pretrained_model_name=pretrained_model_name)
     target_encoder = copy.deepcopy(encoder)
     
+
+    # === expose key objects to module globals so helper functions can use them ===
+    # train_epoch and a few other functions use encoder, predictor, target_encoder, device etc.
+    # These were created in the local scope; make them available at module level.
+    globals().update({
+        'encoder': encoder,
+        'predictor': predictor,
+        'target_encoder': target_encoder,
+        'device': device,
+    })
+    # If you want to expose more objects later (optimizer, scheduler...), add them here similarly.
+
     # Initialize uncertainty-guided collator
     collator = UncertaintyGuidedCollator(
         student_model_instance=encoder,
