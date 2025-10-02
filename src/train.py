@@ -469,6 +469,10 @@ def main(args, resume_preempt=False):
             image_folder=image_folder,
             copy_data=copy_data,
             drop_last=True)
+globals().update({
+    'unsupervised_loader': unsupervised_loader,
+})
+
     ipe = len(unsupervised_loader)
 
     # -- init optimizer and scheduler
@@ -485,7 +489,11 @@ def main(args, resume_preempt=False):
         num_epochs=num_epochs,
         ipe_scale=ipe_scale,
         use_bfloat16=use_bfloat16)
-
+globals().update({
+    'optimizer': optimizer,
+    'scheduler': scheduler,
+    'wd_scheduler': wd_scheduler,
+})
     # Set default values for missing variables
     attention_log_freq = 100
     attention_output_dir = './output/attention_maps'
