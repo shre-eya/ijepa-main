@@ -119,10 +119,13 @@ class UncertaintyGuidedCollator(MultiMaskBlockCollator):
                         num_mc_samples=self.num_mc_samples
                     )
                     # Average variance across patches in this block
-                    # Ensure target_indices are within bounds
-                    valid_indices = target_indices[target_indices < patch_vars.size(1)]
-                    if len(valid_indices) > 0:
-                        block_var = patch_vars[0, valid_indices].mean()
+                    # FIX: Ensure target_indices are within bounds and handle tensor safely
+                    if isinstance(target_indices, torch.Tensor) and len(target_indices) > 0:
+                        valid_indices = target_indices[target_indices < patch_vars.size(1)]
+                        if len(valid_indices) > 0:
+                            block_var = patch_vars[0, valid_indices].mean()
+                        else:
+                            block_var = torch.tensor(0.0, device=device)
                     else:
                         block_var = torch.tensor(0.0, device=device)
                 except Exception as e:
@@ -201,12 +204,25 @@ class UncertaintyGuidedCollator(MultiMaskBlockCollator):
         Process a batch of images to create context and target masks based on uncertainty.
         
         Args:
-            batch: List of image tensors
+            batch: List of (image, label) tuples from dataset
             
         Returns:
-            Tuple of (images, context_masks, target_masks)
+            Tuple of (collated_batch, context_masks, target_masks)
         """
-        images = torch.stack(batch, dim=0)
+        # FIX: Handle empty batches
+        if not batch or len(batch) == 0:
+            raise ValueError("Empty batch provided to collator")
+            
+        # FIX: Handle (image, label) tuples properly - extract only images
+        # The dataset returns (image, label) tuples, but we only need images for masking
+        if isinstance(batch[0], (tuple, list)) and len(batch[0]) == 2:
+            # Extract images from (image, label) tuples
+            images = [item[0] for item in batch]
+        else:
+            # Fallback: assume batch contains only images
+            images = batch
+            
+        images = torch.stack(images, dim=0)
         B = images.size(0)
         device = images.device
         
@@ -235,11 +251,45 @@ class UncertaintyGuidedCollator(MultiMaskBlockCollator):
         target_masks = [torch.zeros(num_patches, dtype=torch.bool, device=device) for _ in range(B)]
         
         for i in range(B):
-            context_masks[i][all_context_indices[i]] = True
-            for target_idx in all_target_indices[i]:
-                target_masks[i][target_idx] = True
+            # FIX: Safely handle context indices with bounds checking
+            if len(all_context_indices[i]) > 0:
+                # Ensure indices are within bounds
+                valid_context_indices = all_context_indices[i][all_context_indices[i] < num_patches]
+                if len(valid_context_indices) > 0:
+                    context_masks[i][valid_context_indices] = True
+            
+            # FIX: Safely handle target indices - each target_idx can be a tensor of indices
+            for target_block in all_target_indices[i]:
+                if isinstance(target_block, torch.Tensor):
+                    # Handle tensor of indices (patch indices within a block)
+                    # Ensure all indices are within bounds
+                    valid_target_indices = target_block[target_block < num_patches]
+                    if len(valid_target_indices) > 0:
+                        target_masks[i][valid_target_indices] = True
+                else:
+                    # Handle single index (convert to tensor if needed)
+                    if isinstance(target_block, (int, float)):
+                        target_idx = int(target_block)
+                        if 0 <= target_idx < num_patches:
+                            target_masks[i][target_idx] = True
+                    else:
+                        # Handle other iterable types
+                        try:
+                            for idx in target_block:
+                                if isinstance(idx, torch.Tensor):
+                                    idx = idx.item() if idx.numel() == 1 else idx
+                                if isinstance(idx, (int, float)):
+                                    idx = int(idx)
+                                    if 0 <= idx < num_patches:
+                                        target_masks[i][idx] = True
+                        except Exception as e:
+                            print(f"Warning: Could not process target index {target_block}: {e}")
         
         context_masks = torch.stack(context_masks)
         target_masks = torch.stack(target_masks)
         
-        return images, context_masks, target_masks
+        # FIX: Follow the same pattern as other collators - return collated batch
+        # Create a collated batch using the original batch structure
+        collated_batch = torch.utils.data.default_collate(batch)
+        
+        return collated_batch, context_masks, target_masks
