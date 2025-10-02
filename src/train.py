@@ -513,9 +513,18 @@ globals().update({
     for p in target_encoder.parameters():
         p.requires_grad = False
 
-    # -- momentum schedule
-    momentum_scheduler = (ema[0] + i*(ema[1]-ema[0])/(ipe*num_epochs*ipe_scale)
-                          for i in range(int(ipe*num_epochs*ipe_scale)+1))
+    # -- momentum schedule (cosine schedule from ema[0] -> ema[1])
+    total_iters = int(ipe * num_epochs * ipe_scale)
+    def _cosine_schedule_iter(base_value, final_value, total_steps):
+        for i in range(total_steps + 1):
+            progress = i / total_steps if total_steps > 0 else 1.0
+            value = float(final_value + (base_value - final_value) * 0.5 * (1. + np.cos(np.pi * progress)))
+            yield value
+    momentum_scheduler = iter(_cosine_schedule_iter(ema[0], ema[1], total_iters))
+
+globals().update({
+    'momentum_scheduler': momentum_scheduler,
+})
 
     start_epoch = 0
     # -- load training checkpoint
