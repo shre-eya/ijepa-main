@@ -206,7 +206,14 @@ class UncertaintyGuidedCollator(MultiMaskBlockCollator):
         Returns:
             Tuple of (images, context_masks, target_masks)
         """
-        images = torch.stack(batch, dim=0)
+        """ images = torch.stack(batch, dim=0)
+        """
+        # Handle datasets that return tuples (e.g. (image, label))
+        if isinstance(batch[0], (tuple, list)):
+           images = torch.stack([b[0] for b in batch], dim=0)
+        else:
+           images = torch.stack(batch, dim=0)
+
         B = images.size(0)
         device = images.device
         
