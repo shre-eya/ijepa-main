@@ -94,7 +94,9 @@ def save_variance_statistics(encoder, images, context_masks, epoch, itr, output_
     Save patch-wise variance statistics from MC forward passes.
     
     Args:
-        encoder: The encoder model
+        
+
+encoder: The encoder model
         images: Batch of images [B, C, H, W]
         context_masks: Boolean masks for context regions [B, N]
         epoch: Current epoch number
@@ -414,6 +416,18 @@ def main(args, resume_preempt=False):
         pretrained_model_name=pretrained_model_name)
     target_encoder = copy.deepcopy(encoder)
     
+
+    # === expose key objects to module globals so helper functions can use them ===
+    # train_epoch and a few other functions use encoder, predictor, target_encoder, device etc.
+    # These were created in the local scope; make them available at module level.
+    globals().update({
+        'encoder': encoder,
+        'predictor': predictor,
+        'target_encoder': target_encoder,
+        'device': device,
+    })
+    # If you want to expose more objects later (optimizer, scheduler...), add them here similarly.
+
     # Initialize uncertainty-guided collator
     collator = UncertaintyGuidedCollator(
         student_model_instance=encoder,
@@ -455,6 +469,10 @@ def main(args, resume_preempt=False):
             image_folder=image_folder,
             copy_data=copy_data,
             drop_last=True)
+globals().update({
+    'unsupervised_loader': unsupervised_loader,
+})
+
     ipe = len(unsupervised_loader)
 
     # -- init optimizer and scheduler
@@ -471,7 +489,11 @@ def main(args, resume_preempt=False):
         num_epochs=num_epochs,
         ipe_scale=ipe_scale,
         use_bfloat16=use_bfloat16)
-
+globals().update({
+    'optimizer': optimizer,
+    'scheduler': scheduler,
+    'wd_scheduler': wd_scheduler,
+})
     # Set default values for missing variables
     attention_log_freq = 100
     attention_output_dir = './output/attention_maps'
