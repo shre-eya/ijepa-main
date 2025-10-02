@@ -288,8 +288,7 @@ class UncertaintyGuidedCollator(MultiMaskBlockCollator):
         context_masks = torch.stack(context_masks)
         target_masks = torch.stack(target_masks)
         
-        # FIX: Follow the same pattern as other collators - return collated batch
-        # Create a collated batch using the original batch structure
-        collated_batch = torch.utils.data.default_collate(batch)
-        
-        return collated_batch, context_masks, target_masks
+        # FIX: Return images tensor directly instead of collated batch
+        # train_step expects images to be a tensor that supports .to(device)
+        # We already processed and stacked the images correctly above
+        return images, context_masks, target_masks
