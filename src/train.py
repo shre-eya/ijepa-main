@@ -271,11 +271,13 @@ def train_epoch(epoch):
     for itr, (images, context_masks, target_masks) in enumerate(unsupervised_loader):
         start_time = time.time()
         
-        # Update learning rate
-        for i, param_group in enumerate(optimizer.param_groups):
-            param_group['lr'] = scheduler[itr]
-            if i == 0:  # only the first group is regularized
-                param_group['weight_decay'] = wd_scheduler[itr]
+        # Update learning rate and weight decay
+        # FIX: Use .step() method instead of indexing - scheduler objects are not subscriptable
+        current_lr = scheduler.step()
+        current_wd = wd_scheduler.step()
+        
+        # Note: scheduler.step() and wd_scheduler.step() already update the optimizer param groups internally
+        # but the above calls also return the current values for logging if needed
         
         # Train step
         loss = train_step(images, context_masks, target_masks)
