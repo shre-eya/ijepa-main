@@ -14,9 +14,23 @@ def apply_masks(x, masks):
     :param masks: list of tensors containing indices of patches in [N] to keep
     """
     all_x = []
+    B, N, D = x.shape
     for m in masks:
-        # torch.gather requires the index tensor to be of dtype torch.int64 (long)
-        # Some upstream code may create indices as int32; force cast to avoid runtime errors
-        mask_keep = m.to(torch.int64).unsqueeze(-1).repeat(1, 1, x.size(-1))
-        all_x += [torch.gather(x, dim=1, index=mask_keep)]
+        # Normalize mask index tensor shape and dtype before gather
+        # - Ensure indices are int64: torch.gather requires long dtype
+        # - Ensure indices have per-batch shape [B, K] so that gather on dim=1 picks K patches for each sample
+        if m.dtype != torch.int64:
+            m = m.to(torch.int64)
+        if m.ndim == 1:
+            # Provided as [K]; repeat for each batch element
+            m = m.unsqueeze(0).repeat(B, 1)
+        elif m.ndim == 2 and m.size(0) == 1 and B > 1:
+            # Provided as [1, K] but input has batch B; repeat across batch
+            m = m.repeat(B, 1)
+
+        # Expand indices to [B, K, D] for gather along dim=1
+        mask_keep = m.unsqueeze(-1).repeat(1, 1, D)
+
+        # Gather selected patches; result is [B, K, D]
+        all_x.append(torch.gather(x, dim=1, index=mask_keep))
     return torch.cat(all_x, dim=0)
