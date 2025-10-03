@@ -2,6 +2,42 @@ import torch
 import pytest
 
 from masks.utils import apply_masks
+from train import train_step
+
+
+def test_train_step_cpu_no_cuda(monkeypatch):
+    # Skip if CUDA is available; this test is for CPU-only path
+    if torch.cuda.is_available():
+        pytest.skip("CUDA available; CPU-only scaler guard not exercised")
+
+    # Minimal stubs to satisfy train_step's global dependencies
+    class DummyEncoder(torch.nn.Module):
+        def forward(self, x, masks=None):
+            B = x.size(0)
+            return torch.zeros(B, 4, 8)
+    class DummyPredictor(torch.nn.Module):
+        def forward(self, z, context_masks, target_masks):
+            B = z.size(0)
+            return torch.zeros(B, 4, 8)
+
+    # Inject globals expected by train_step
+    import src.train as t
+    t.encoder = DummyEncoder()
+    t.target_encoder = DummyEncoder()
+    t.predictor = DummyPredictor()
+    t.device = torch.device('cpu')
+    t.optimizer = torch.optim.SGD([torch.nn.Parameter(torch.randn(1))], lr=0.1)
+    t.momentum_scheduler = iter([0.99])
+    t.use_bfloat16 = False
+    t.scaler = None  # ensure CPU-only path
+
+    images = torch.randn(2, 3, 16, 16)
+    context_masks = torch.zeros(2, 4, dtype=torch.bool)
+    target_masks = torch.zeros(2, 4, dtype=torch.bool)
+
+    # Should not raise NameError or require scaler on CPU
+    loss_val = t.train_step(images, context_masks, target_masks)
+    assert isinstance(loss_val, float)
 
 
 def test_mask_keep_dtype_and_gather_no_dtype_error():

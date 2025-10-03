@@ -243,10 +243,14 @@ def train_step(images, context_masks, target_masks):
         # Compute loss
         loss = F.smooth_l1_loss(p, h)
     
-    # Backward pass
-    scaler.scale(loss).backward()
-    scaler.step(optimizer)
-    scaler.update()
+    # Backward and optimizer step with AMP scaler guard
+    if scaler is not None:
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
+    else:
+        loss.backward()
+        optimizer.step()
     
     # Update target encoder
     with torch.no_grad():
@@ -491,10 +495,15 @@ def main(args, resume_preempt=False):
         num_epochs=num_epochs,
         ipe_scale=ipe_scale,
         use_bfloat16=use_bfloat16)
+    # Ensure scaler exists even when CUDA/AMP is unavailable
+    # On CPU-only runs, set scaler=None and fall back to .backward()
+    if ('scaler' not in locals()) or (scaler is None):
+        scaler = torch.cuda.amp.GradScaler() if torch.cuda.is_available() else None
     globals().update({
         'optimizer': optimizer,
         'scheduler': scheduler,
         'wd_scheduler': wd_scheduler,
+        'scaler': scaler,
         'use_bfloat16': use_bfloat16,
     })
     # Set default values for missing variables
