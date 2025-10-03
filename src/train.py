@@ -495,6 +495,7 @@ def main(args, resume_preempt=False):
         'optimizer': optimizer,
         'scheduler': scheduler,
         'wd_scheduler': wd_scheduler,
+        'use_bfloat16': use_bfloat16,
     })
     # Set default values for missing variables
     attention_log_freq = 100
