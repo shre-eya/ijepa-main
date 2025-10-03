@@ -15,8 +15,8 @@ def test_apply_masks_mismatched_shapes_handled():
     # Apply with list containing the same indices for all batch elements
     out = apply_masks(x, [idx_1d])
 
-    # Expect output to concatenate over mask groups along batch: here 1 group -> shape [B, K, D]
-    assert out.shape == (B, idx_1d.numel(), D)
+    # Now full-length is preserved; shape should be [B, N, D]
+    assert out.shape == (B, N, D)
 
     # Ensure gather index dtype normalization is applied (no RuntimeError)
     # If the function fails, an exception would be raised before this point
@@ -31,6 +31,7 @@ def test_apply_masks_per_batch_indices():
     ]
 
     out = apply_masks(x, masks)
-    assert out.shape == (B, 3, D)
+    # Full-length should be preserved
+    assert out.shape == (B, N, D)
 
 

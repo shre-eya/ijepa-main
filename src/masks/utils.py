@@ -12,13 +12,18 @@ def apply_masks(x, masks):
     """
     :param x: tensor of shape [B (batch-size), N (num-patches), D (feature-dim)]
     :param masks: list of tensors containing indices of patches in [N] to keep
+    
+    This function preserves the sequence length N. For each mask in `masks`, we
+    create a per-batch selection map of shape [B, N] and zero out the unselected
+    positions in `x`. The outputs for each mask are concatenated along the batch
+    dimension, resulting in shape [len(masks) * B, N, D].
     """
     all_x = []
     B, N, D = x.shape
     for m in masks:
-        # Normalize mask index tensor shape and dtype before gather
-        # - Ensure indices are int64: torch.gather requires long dtype
-        # - Ensure indices have per-batch shape [B, K] so that gather on dim=1 picks K patches for each sample
+        # Normalize mask index tensor shape and dtype before use
+        # - Ensure indices are int64 (long): required by indexing/gather APIs
+        # - Ensure indices have per-batch shape [B, K] so we can build a [B, N] selection map
         if m.dtype != torch.int64:
             m = m.to(torch.int64)
         if m.ndim == 1:
@@ -28,9 +33,17 @@ def apply_masks(x, masks):
             # Provided as [1, K] but input has batch B; repeat across batch
             m = m.repeat(B, 1)
 
-        # Expand indices to [B, K, D] for gather along dim=1
-        mask_keep = m.unsqueeze(-1).repeat(1, 1, D)
+        # Build selection map [B, N] with 1s at kept indices and 0s elsewhere
+        select = x.new_zeros((B, N), dtype=x.dtype)
+        # Use scatter to mark kept indices; values don't matter beyond non-zero
+        ones = torch.ones_like(m, dtype=x.dtype)
+        select.scatter_(dim=1, index=m, src=ones)
+        # Expand to [B, N, D] and zero out unselected positions
+        select = select.unsqueeze(-1)  # [B, N, 1]
+        masked = x * select
+        all_x.append(masked)
 
-        # Gather selected patches; result is [B, K, D]
-        all_x.append(torch.gather(x, dim=1, index=mask_keep))
-    return torch.cat(all_x, dim=0)
+    out = torch.cat(all_x, dim=0)
+    # Safety: preserve sequence length
+    assert out.size(1) == N, f"apply_masks: seq length changed from {N} to {out.size(1)}"
+    return out

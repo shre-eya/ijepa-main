@@ -299,6 +299,8 @@ class VisionTransformerPredictor(nn.Module):
 
         # -- add positional embedding to x tokens
         x_pos_embed = self.predictor_pos_embed.repeat(B, 1, 1)
+        # Safety: ensure shapes match before addition
+        assert x.shape == x_pos_embed.shape, f"shape mismatch before add: x={x.shape}, pos={x_pos_embed.shape}"
         x += apply_masks(x_pos_embed, masks_x)
 
         _, N_ctxt, D = x.shape
@@ -515,6 +517,8 @@ class VisionTransformer(nn.Module):
 
         # -- add positional embedding to x
         pos_embed = self.interpolate_pos_encoding(x, self.pos_embed)
+        # Safety: ensure shapes match before addition
+        assert x.shape == pos_embed.shape, f"shape mismatch before add: x={x.shape}, pos={pos_embed.shape}"
         x = x + pos_embed
 
         # -- mask x
