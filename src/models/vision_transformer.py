@@ -517,8 +517,11 @@ class VisionTransformer(nn.Module):
 
         # -- add positional embedding to x
         pos_embed = self.interpolate_pos_encoding(x, self.pos_embed)
-        # Safety: ensure shapes match before addition
-        assert x.shape == pos_embed.shape, f"shape mismatch before add: x={x.shape}, pos={pos_embed.shape}"
+        # Broadcast/expand positional embedding to batch B if needed
+        # pos_embed often has shape [1, N, D]; expand to [B, N, D]
+        pos_embed = pos_embed.expand(x.shape[0], -1, -1)
+        # Safety: ensure N, D match before addition
+        assert x.shape[1:] == pos_embed.shape[1:], f"shape mismatch before add: x={x.shape}, pos={pos_embed.shape}"
         x = x + pos_embed
 
         # -- mask x

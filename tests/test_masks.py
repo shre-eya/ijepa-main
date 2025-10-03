@@ -2,6 +2,7 @@ import torch
 import pytest
 
 from masks.utils import apply_masks
+from models.vision_transformer import VisionTransformer
 
 
 def test_apply_masks_mismatched_shapes_handled():
@@ -33,5 +34,16 @@ def test_apply_masks_per_batch_indices():
     out = apply_masks(x, masks)
     # Full-length should be preserved
     assert out.shape == (B, N, D)
+
+
+def test_vit_positional_embedding_broadcast_batch_gt_one():
+    # Ensure positional embeddings broadcast/expand to B>1 without shape mismatch
+    B, C, H, W = 3, 3, 32, 32
+    model = VisionTransformer(img_size=32, patch_size=16, embed_dim=64, depth=1, num_heads=2)
+    x = torch.randn(B, C, H, W)
+
+    # Forward without masks should not assert on positional embedding shapes
+    out = model(x)
+    assert out.shape[0] == B
 
 
