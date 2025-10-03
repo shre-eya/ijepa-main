@@ -15,6 +15,8 @@ def apply_masks(x, masks):
     """
     all_x = []
     for m in masks:
-        mask_keep = m.unsqueeze(-1).repeat(1, 1, x.size(-1))
+        # torch.gather requires the index tensor to be of dtype torch.int64 (long)
+        # Some upstream code may create indices as int32; force cast to avoid runtime errors
+        mask_keep = m.to(torch.int64).unsqueeze(-1).repeat(1, 1, x.size(-1))
         all_x += [torch.gather(x, dim=1, index=mask_keep)]
     return torch.cat(all_x, dim=0)
