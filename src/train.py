@@ -522,9 +522,9 @@ def main(args, resume_preempt=False):
             yield value
     momentum_scheduler = iter(_cosine_schedule_iter(ema[0], ema[1], total_iters))
 
-globals().update({
-    'momentum_scheduler': momentum_scheduler,
-})
+    globals().update({
+      'momentum_scheduler': momentum_scheduler,
+    })
 
     start_epoch = 0
     # -- load training checkpoint
