@@ -40,6 +40,39 @@ def test_train_step_cpu_no_cuda(monkeypatch):
     assert isinstance(loss_val, float)
 
 
+def test_save_checkpoint_with_loss():
+    """Test that save_checkpoint accepts loss_avg parameter without NameError."""
+    import src.train as t
+    import tempfile
+    import os
+    
+    # Mock the required globals
+    t.encoder = torch.nn.Linear(1, 1)
+    t.predictor = torch.nn.Linear(1, 1)
+    t.target_encoder = torch.nn.Linear(1, 1)
+    t.optimizer = torch.optim.SGD([torch.nn.Parameter(torch.randn(1))], lr=0.1)
+    t.scaler = None
+    t.rank = 0
+    t.latest_path = tempfile.mktemp(suffix='.pth')
+    t.save_path = tempfile.mktemp(suffix='.pth')
+    t.batch_size = 2
+    t.world_size = 1
+    t.lr = 0.01
+    
+    # Test that save_checkpoint works with explicit loss_avg
+    try:
+        t.save_checkpoint(epoch=0, loss_avg=0.5)
+        # Check that file was created
+        assert os.path.exists(t.latest_path)
+    except NameError as e:
+        pytest.fail(f"save_checkpoint raised NameError: {e}")
+    finally:
+        # Cleanup
+        for path in [t.latest_path, t.save_path]:
+            if os.path.exists(path):
+                os.remove(path)
+
+
 def test_mask_keep_dtype_and_gather_no_dtype_error():
     # Create a small input tensor: B=2, N=4 patches, D=3 features
     x = torch.randn(2, 4, 3)

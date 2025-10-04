@@ -553,7 +553,7 @@ def main(args, resume_preempt=False):
             next(momentum_scheduler)
             mask_collator.step()
 
-    def save_checkpoint(epoch):
+    def save_checkpoint(epoch, loss_avg):
         save_dict = {
             'encoder': encoder.state_dict(),
             'predictor': predictor.state_dict(),
@@ -561,7 +561,7 @@ def main(args, resume_preempt=False):
             'opt': optimizer.state_dict(),
             'scaler': None if scaler is None else scaler.state_dict(),
             'epoch': epoch,
-            'loss': loss_meter.avg,
+            'loss': loss_avg,
             'batch_size': batch_size,
             'world_size': world_size,
             'lr': lr
@@ -581,14 +581,14 @@ def main(args, resume_preempt=False):
         
         # Save checkpoint
         if rank == 0 and (epoch % checkpoint_freq == 0 or epoch == num_epochs-1):
-            save_checkpoint(epoch)
+            save_checkpoint(epoch, loss)
         
         # Synchronize across processes
         torch.distributed.barrier()
     
     # Final checkpoint
     if rank == 0:
-        save_checkpoint(epoch=num_epochs)
+        save_checkpoint(epoch=num_epochs, loss_avg=loss)
         logger.info('Training finished.')
 
 
