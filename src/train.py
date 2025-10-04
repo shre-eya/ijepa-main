@@ -216,10 +216,20 @@ def train_step(images, context_masks, target_masks):
         context_masks: Boolean masks for context regions [B, N]
         target_masks: Boolean masks for target regions [B, N]
     """
-    # Move everything to device with non_blocking for efficiency
+    # Ensure device alignment - move everything to GPU when available
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     images = images.to(device, non_blocking=True)
     context_masks = context_masks.to(device, non_blocking=True)
     target_masks = target_masks.to(device, non_blocking=True)
+    
+    # Ensure models are on the same device
+    encoder.to(device)
+    predictor.to(device)
+    target_encoder.to(device)
+    
+    # Debug print for device alignment
+    if torch.cuda.is_available():
+        print(f"[Device Check] Training on {torch.cuda.get_device_name(0)}")
     
     # Reset gradients
     optimizer.zero_grad(set_to_none=True)
@@ -242,6 +252,9 @@ def train_step(images, context_masks, target_masks):
         
         # Compute loss
         loss = F.smooth_l1_loss(p, h)
+    
+    # Debug print for loss device
+    print(f"Loss device before backward: {loss.device}")
     
     # Backward and optimizer step with AMP scaler guard
     # AMP GradScaler requires CUDA tensors; skip scaling on CPU-only runs
