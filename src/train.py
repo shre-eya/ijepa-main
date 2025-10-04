@@ -583,8 +583,9 @@ def main(args, resume_preempt=False):
         if rank == 0 and (epoch % checkpoint_freq == 0 or epoch == num_epochs-1):
             save_checkpoint(epoch, loss)
         
-        # Synchronize across processes
-        torch.distributed.barrier()
+        # Synchronize across processes (only if distributed is initialized)
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            torch.distributed.barrier()
     
     # Final checkpoint
     if rank == 0:
