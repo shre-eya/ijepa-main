@@ -244,7 +244,8 @@ def train_step(images, context_masks, target_masks):
         loss = F.smooth_l1_loss(p, h)
     
     # Backward and optimizer step with AMP scaler guard
-    if scaler is not None:
+    # AMP GradScaler requires CUDA tensors; skip scaling on CPU-only runs
+    if scaler is not None and loss.is_cuda:
         scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
