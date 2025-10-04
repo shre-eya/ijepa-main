@@ -216,10 +216,10 @@ def train_step(images, context_masks, target_masks):
         context_masks: Boolean masks for context regions [B, N]
         target_masks: Boolean masks for target regions [B, N]
     """
-    # Move everything to device
-    images = images.to(device)
-    context_masks = context_masks.to(device)
-    target_masks = target_masks.to(device)
+    # Move everything to device with non_blocking for efficiency
+    images = images.to(device, non_blocking=True)
+    context_masks = context_masks.to(device, non_blocking=True)
+    target_masks = target_masks.to(device, non_blocking=True)
     
     # Reset gradients
     optimizer.zero_grad(set_to_none=True)
@@ -252,6 +252,10 @@ def train_step(images, context_masks, target_masks):
     else:
         loss.backward()
         optimizer.step()
+    
+    # Verify loss device for debugging
+    if torch.cuda.is_available() and not loss.is_cuda:
+        logger.warning(f"Loss is on {loss.device} but CUDA is available - check device alignment")
     
     # Update target encoder
     with torch.no_grad():
@@ -333,7 +337,7 @@ def main(args, resume_preempt=False):
     use_pretrained = args['meta'].get('use_pretrained', False)
     pretrained_source = args['meta'].get('pretrained_source', 'timm')
     pretrained_model_name = args['meta'].get('pretrained_model_name', None)
-    device = torch.device('cpu')
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
     # -- DATA
@@ -517,6 +521,12 @@ def main(args, resume_preempt=False):
     encoder = encoder.to(device)
     predictor = predictor.to(device)
     target_encoder = target_encoder.to(device)
+    
+    # Verify device alignment for debugging
+    logger.info(f"Training on device: {device}")
+    if torch.cuda.is_available():
+        logger.info(f"CUDA device: {torch.cuda.get_device_name(0)}")
+        logger.info(f"Model devices - encoder: {next(encoder.parameters()).device}, predictor: {next(predictor.parameters()).device}")
 
 
 

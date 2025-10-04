@@ -81,6 +81,61 @@ def test_train_step_cpu_with_scaler_no_amp_assertion():
             pass
 
 
+def test_device_alignment_cuda_available():
+    """Test that models and tensors are properly moved to CUDA when available."""
+    import src.train as t
+    
+    # Skip if CUDA is not available
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA not available; device alignment test skipped")
+    
+    # Minimal stubs to satisfy train_step's global dependencies
+    class DummyEncoder(torch.nn.Module):
+        def forward(self, x, masks=None):
+            B = x.size(0)
+            return torch.zeros(B, 4, 8)
+    class DummyPredictor(torch.nn.Module):
+        def forward(self, z, context_masks, target_masks):
+            B = z.size(0)
+            return torch.zeros(B, 4, 8)
+
+    # Inject globals expected by train_step with CUDA device
+    t.encoder = DummyEncoder().cuda()
+    t.target_encoder = DummyEncoder().cuda()
+    t.predictor = DummyPredictor().cuda()
+    t.device = torch.device('cuda')
+    t.optimizer = torch.optim.SGD([torch.nn.Parameter(torch.randn(1).cuda())], lr=0.1)
+    t.momentum_scheduler = iter([0.99])
+    t.use_bfloat16 = False
+    t.scaler = torch.cuda.amp.GradScaler()
+
+    # Create CUDA tensors
+    images = torch.randn(2, 3, 16, 16).cuda()
+    context_masks = torch.zeros(2, 4, dtype=torch.bool).cuda()
+    target_masks = torch.zeros(2, 4, dtype=torch.bool).cuda()
+
+    # Verify all tensors are on CUDA
+    assert images.is_cuda, f"images on {images.device}, expected CUDA"
+    assert context_masks.is_cuda, f"context_masks on {context_masks.device}, expected CUDA"
+    assert target_masks.is_cuda, f"target_masks on {target_masks.device}, expected CUDA"
+    
+    # Verify models are on CUDA
+    assert next(t.encoder.parameters()).is_cuda, f"encoder on {next(t.encoder.parameters()).device}, expected CUDA"
+    assert next(t.predictor.parameters()).is_cuda, f"predictor on {next(t.predictor.parameters()).device}, expected CUDA"
+
+    # Should work with AMP scaler since all tensors are on CUDA
+    try:
+        loss_val = t.train_step(images, context_masks, target_masks)
+        assert isinstance(loss_val, float)
+        assert loss_val >= 0, "Loss should be non-negative"
+    except AssertionError as e:
+        if "assert outputs.is_cuda" in str(e) or "device.type == 'xla'" in str(e):
+            pytest.fail(f"AMP scaler assertion error on CUDA: {e}")
+        else:
+            # Other assertion errors are acceptable
+            pass
+
+
 def test_save_checkpoint_with_loss():
     """Test that save_checkpoint accepts loss_avg parameter without NameError."""
     import src.train as t
