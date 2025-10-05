@@ -6,7 +6,7 @@ import torchvision
 import torchvision.transforms as T
 import matplotlib.pyplot as plt
 
-from helper import init_model, load_checkpoint
+from .helper import init_model, load_checkpoint
 
 
 def denorm(t, mean, std):
