@@ -26,8 +26,8 @@ def main():
 
     # Paths and constants
     ckpt_path = './output/cifar10_uncertainty/jepa_uncertainty-latest.pth.tar'
-    out_path = './output/cifar10_uncertainty/reconstruction_grid.png'
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    save_dir = './output/cifar10_uncertainty/reconstructions_predicted'
+    os.makedirs(save_dir, exist_ok=True)
 
     # CIFAR-10 normalization (common for 32x32)
     mean = (0.4914, 0.4822, 0.4465)
@@ -71,117 +71,129 @@ def main():
     encoder.eval()
     predictor.eval()
 
-    # Sample 5 random indices
-    indices = random.sample(range(len(test_set)), 5)
-
-    # Prepare figure: 2 rows x 5 cols
-    fig, axes = plt.subplots(2, 5, figsize=(20, 8))
-
-    # Unnormalize transform for visualization
+    # Utility: unnormalize for visualization
     def unnormalize(img):
         return denorm(img, mean, std)
 
-    # Helper to overlay mask
+    # Helper: overlay mask on an image
     def overlay_mask(img_chw, mask_bool_hw, color=(0, 1, 0), alpha=0.35):
         img = img_chw.clone()
         img = torch.clamp(img, 0, 1)
-        c, h, w = img.shape
         overlay = img.clone()
         overlay[0].masked_fill_(mask_bool_hw, color[0])
         overlay[1].masked_fill_(mask_bool_hw, color[1])
         overlay[2].masked_fill_(mask_bool_hw, color[2])
         return img * (1 - alpha) + overlay * alpha
 
+    # Build per-channel normalized gray value such that after unnormalize it becomes 0.5
+    gray_norm = torch.tensor([
+        (0.5 - mean[0]) / std[0],
+        (0.5 - mean[1]) / std[1],
+        (0.5 - mean[2]) / std[2],
+    ], device=device).view(1, 3, 1, 1)
+
+    # Select 5 random indices
+    indices = random.sample(range(len(test_set)), 5)
+
     with torch.no_grad():
-        for col, idx in enumerate(indices):
-            img_tensor, _ = test_set[idx]
+        for idx, sample_idx in enumerate(indices):
+            img_tensor, _ = test_set[sample_idx]
             img_bchw = img_tensor.unsqueeze(0).to(device)
 
-            # Build a simple square mask over ~25% patches for visualization
-            # Assume patch_size=4 on 32x32 -> 8x8 = 64 patches
-            B = 1
-            N = (32 // 4) * (32 // 4)
-            H_p = W_p = 8
-            mask_bool = torch.zeros(B, N, dtype=torch.bool, device=device)
-            # Select a 3x3 block in the center
-            center = 4
-            sel = []
-            for dy in range(-1, 2):
-                for dx in range(-1, 2):
-                    y = center + dy
-                    x = center + dx
-                    if 0 <= y < H_p and 0 <= x < W_p:
-                        sel.append(y * W_p + x)
-            sel = torch.tensor(sel, device=device)
-            mask_bool[0, sel] = True
-
-            # Forward encoder with mask (returns patch embeddings)
-            z = encoder(img_bchw, masks=mask_bool)
-
-            # Predict reconstructions over target mask using predictor
-            preds = predictor(z, masks_x=mask_bool, masks=mask_bool)
-            # preds: [B, K, D], but we need to project back to image space for visualization
-            # For a qualitative demo, we will simply show masked context and original image; full decoding isn't defined here
-
-            # Build masked context visualization (gray over masked patches)
-            img_vis = unnormalize(img_bchw.clone())
-            img_vis = torch.clamp(img_vis, 0, 1)
-            grid_h = grid_w = 8
+            # Patching setup for 32x32 with patch_size=4
             ph = pw = 4
-            masked_context = img_vis.clone()
+            grid_h = grid_w = 8
+            B = 1
+            N = grid_h * grid_w
+
+            # Create a random 50% masking over patches
+            # Build a boolean mask where True indicates MASKED (to be predicted)
+            perm = torch.randperm(N, device=device)
+            num_mask = N // 2
+            masked_indices = perm[:num_mask]
+            mask_bool = torch.zeros(B, N, dtype=torch.bool, device=device)
+            mask_bool[0, masked_indices] = True
+            context_mask_bool = ~mask_bool
+
+            # Encode context patches only
+            z = encoder(img_bchw, masks=context_mask_bool)
+
+            # Predict masked patch embeddings
+            preds = predictor(z, masks_x=context_mask_bool, masks=mask_bool)  # [B, K, D]
+
+            # Approximate unpatchify: map embeddings -> pixels via transposed patch embedding weights
+            # Use Conv2d weights from the encoder's patch embed
+            W = encoder.patch_embed.proj.weight  # [D, C, ph, pw]
+            b = encoder.patch_embed.proj.bias    # [D]
+            D, C, _, _ = W.shape
+
+            # Prepare empty reconstructed image in normalized space, fill non-masked with gray
+            recon_norm = gray_norm.expand(B, 3, 32, 32).clone()
+
+            # Also prepare masked-context image (original but gray on masked regions)
+            img_vis = img_bchw.clone()
+
             mask_hw = torch.zeros((32, 32), dtype=torch.bool, device=device)
+
+            # Iterate patches and place predictions for masked ones
             k = 0
+            pred_ptr = 0
             for gy in range(grid_h):
                 for gx in range(grid_w):
-                    is_ctx = mask_bool[0, k].item()
                     y0, x0 = gy * ph, gx * pw
-                    if not is_ctx:
-                        # Context kept; leave as is
-                        pass
-                    else:
-                        # Masked region -> gray
-                        masked_context[:, :, y0:y0+ph, x0:x0+pw] = 0.5
+                    if mask_bool[0, k]:
+                        # Predicted embedding for this masked patch
+                        v = preds[0, pred_ptr]  # [D]
+                        pred_ptr += 1
+                        # Linear back-projection: (v - b) * W^T -> [C, ph, pw]
+                        patch = torch.tensordot(v - b, W, dims=([0], [0]))  # [C, ph, pw]
+                        recon_norm[:, :, y0:y0+ph, x0:x0+pw] = patch.unsqueeze(0)
                         mask_hw[y0:y0+ph, x0:x0+pw] = True
+                    else:
+                        # Context remains original for masked-context view; gray in recon view already set
+                        pass
                     k += 1
 
-            # Approximate reconstruction visualization: show original where mask was (as proxy)
-            # In absence of an explicit decoder to pixels, use original pixels for illustration of locations
-            reconstruction = img_vis.clone()
+            # Build masked context visualization in pixel space
+            masked_context = unnormalize(img_vis.clone())
+            masked_context = torch.clamp(masked_context, 0, 1)
+            masked_context[:, :, mask_hw] = 0.5
 
-            # Overlay mask regions in green
-            mask_overlay = overlay_mask(img_vis[0], mask_hw, color=(0, 1, 0), alpha=0.35).unsqueeze(0)
+            # Unnormalize reconstructed image for display
+            recon_disp = torch.clamp(unnormalize(recon_norm), 0, 1)
 
-            # Convert to CPU and grid-friendly tensors
-            original_img = to_numpy_image(img_vis)
-            masked_ctx_img = to_numpy_image(masked_context)
-            recon_img = to_numpy_image(reconstruction)
-            overlay_img = to_numpy_image(mask_overlay)
+            # Original for display
+            original_disp = torch.clamp(unnormalize(img_bchw.clone()), 0, 1)
 
-            # Place into figure
-            axes[0, col].imshow(original_img[0].permute(1, 2, 0).cpu().numpy())
-            axes[0, col].set_title('Original')
-            axes[0, col].axis('off')
+            # Overlay visualization on original
+            overlay = overlay_mask(original_disp[0], mask_hw, color=(0, 1, 0), alpha=0.35).unsqueeze(0)
 
-            axes[1, col].imshow(masked_ctx_img[0].permute(1, 2, 0).cpu().numpy())
-            axes[1, col].set_title('Masked Context')
-            axes[1, col].axis('off')
+            # Compose 2x2 figure
+            fig, axes = plt.subplots(2, 2, figsize=(6, 6))
+            axes = axes.flatten()
 
-            # For the second row, right cell show reconstruction and mask overlay side-by-side
-            # But we have only 2 rows; instead, overlay mask on reconstruction in same cell title
-            # To satisfy the 2x2 per-sample requirement in one 2x5 grid, we can use small montage columns
-            # Here, show reconstruction on top-left of the cell and overlay next to it via make_grid
-            pair = torchvision.utils.make_grid(torch.stack([recon_img[0], overlay_img[0]], dim=0), nrow=2)
-            axes[0, col].imshow(original_img[0].permute(1, 2, 0).cpu().numpy())
-            axes[0, col].set_title('Original')
-            axes[0, col].axis('off')
-            axes[1, col].imshow(pair.permute(1, 2, 0).cpu().numpy())
-            axes[1, col].set_title('Reconstruction | Mask Overlay')
-            axes[1, col].axis('off')
+            axes[0].imshow(original_disp[0].permute(1, 2, 0).cpu().numpy())
+            axes[0].set_title('Original')
+            axes[0].axis('off')
 
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=200)
-    plt.close(fig)
-    print(f"Saved visualization to {out_path}")
+            axes[1].imshow(masked_context[0].permute(1, 2, 0).cpu().numpy())
+            axes[1].set_title('Masked Context (gray = missing)')
+            axes[1].axis('off')
+
+            axes[2].imshow(recon_disp[0].permute(1, 2, 0).cpu().numpy())
+            axes[2].set_title('Reconstructed (Predicted Masked Pixels)')
+            axes[2].axis('off')
+
+            axes[3].imshow(overlay[0].permute(1, 2, 0).cpu().numpy())
+            axes[3].set_title('Mask Overlay (Green = Reconstructed Regions)')
+            axes[3].axis('off')
+
+            plt.tight_layout()
+            out_file = os.path.join(save_dir, f'reconstruction_predicted_{idx+1}.png')
+            plt.savefig(out_file)
+            plt.close(fig)
+
+    print(f"Saved {len(indices)} predicted reconstructions to {save_dir}")
 
 
 if __name__ == '__main__':
