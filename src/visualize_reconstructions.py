@@ -101,13 +101,13 @@ def main():
     decoder = torch.nn.ConvTranspose2d(
         in_channels=embed_dim,
         out_channels=3,
-        kernel_size=ph,
+        kernel_size=(ph, pw),
         stride=ph
     ).to(device)
     # Initialize decoder as transpose of patch embedding conv
     with torch.no_grad():
-        W = encoder.patch_embed.proj.weight  # [D, C, ph, pw]
-        decoder.weight.copy_(W.permute(1, 0, 2, 3))  # [C, D, ph, pw]
+        W = encoder.patch_embed.proj.weight  # [out_channels(=embed_dim), in_channels(=3), ph, pw]
+        decoder.weight.copy_(W)  # [out_channels(=embed_dim), in_channels(=3), ph, pw] mapped correctly
         if decoder.bias is not None:
             decoder.bias.zero_()
 
