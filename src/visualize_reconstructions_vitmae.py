@@ -22,7 +22,7 @@ def main():
 
     # Load Hugging Face ViT-MAE tiny
     from transformers import AutoImageProcessor, ViTMAEForPreTraining
-    model_name = 'apple/vit-mae-base'
+    model_name = 'facebook/vit-mae-base'
     processor = AutoImageProcessor.from_pretrained(model_name)
     model = ViTMAEForPreTraining.from_pretrained(model_name)
     model.eval().to(device)
